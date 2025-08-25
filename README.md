@@ -1,30 +1,70 @@
-### Combine data (scraped from http://nflcombineresults.com)
+# 🏈 NFL Combine Data Analysis
 
-* Height is in inches; weight is in pounds; 
-* x40yards is the 40 yard dash in seconds; 
-* bench press is measured as the number3 code drill is measured in  of reps for which 225 lbs is pressed; 
-* vertical leap is measured in inches; 
-* broad jump is measured in measured in inches; 
-* 3 cone drill is measured in seconds; s
-* shuttle run is measured in seconds.
+Author: Jane Maguire  
+Date: 2024-04-18
 
-A description of the combine tests can be found here: https://en.wikipedia.org/wiki/NFL_Scouting_Combine
+This project explores relationships between **NFL Scouting Combine** measurements and **2018 on-field performance** (rushing, passing, receiving, and defensive stats). Using exploratory data analysis (EDA), data transformations, and regression diagnostics, the analysis investigates which combine attributes may relate to player performance and where linear modeling assumptions hold (or fail).
 
+---
 
-### 2018 game stats (scraped from https://www.footballdb.com)
+## 📦 Datasets
 
-`rushing_2018.csv` 
+- `NFLcombine.csv` — Player combine measurements (e.g., weight, bench, broad jump, position).
+- `defense_2018.csv` — Defensive stats (e.g., Solo tackles).
+- `receiving_2018.csv` — Receiving stats (e.g., receptions, games played).
+- `rushing_2018.csv` — Rushing stats (e.g., average rushing yards).
 
-Gms = Games Played, Att = Rushing Attempts, Yds = Rushing Attempts, Avg = Rushing Average, YPG = Rushing Yards Per Game, Lg = Longest Rush, TD = Rushing Touchdowns, FD = Rushing First Downs
+**Sources**
+- Combine results: https://nflcombineresults.com/
+- 2018 game stats: https://www.footballdb.com/
+- Combine test descriptions: https://en.wikipedia.org/wiki/NFL_Scouting_Combine
+- Course notes/templates: https://mgimond.github.io/ES218/
 
-`passing_2018.csv` 
+---
 
-Gms = Games Played, Att = Pass Attempts, Cmp = Pass Completions, Pct = Pass Completion Percentage, Yds = Passing Yards, YPA = Yards Per Pass Attempt, TD = Touchdown Passes, TD% = Touchdown Pass Percentage, Int = Intercepted Passes, Int% = Pass Interception Percentage, Lg = Longest Pass Completion, Sack = Passing Sacks, Loss = Sack Yards Lost, Rate = Passer Rating
+## 🛠️ Tech Stack
 
-`receiving_2018.csv`
+- **Language**: R (RMarkdown)
+- **Packages**: `dplyr`, `ggplot2`, `tidyr`, `tukeyedar`, `knitr`
+- **Rendering**: HTML with table of contents and code folding
 
-Gms = Games Played, Rec = Receptions, Yds = Receiving Yards, Avg = Receiving Average, YPG = Receiving Yards Per Game, Lg = Longest Reception, TD = Touchdown Receptions, FD = First Down Receptions, Tar = Receiving Targets, YAC = Yards After Catch
+---
 
-`Defense_2018.csv`
+## 🔍 Analysis Overview
 
-Int = Interceptions, Yds = Interception Return Yards, Avg = Interception Return Average, Lg = Longest Interception Return, TD = Interception Return Touchdowns, Solo = Solo Tackles, Ast = Assisted Tackles, Sack = Sacks, YdsL = Yards Lost on Sacks
+1. **Position vs Weight (Combine)**
+   - Boxplots show strong positional differences in weight, especially **CB vs OT**.
+   - QQ-plot & density plots suggest offset transformation: `CB * 1.5 + 27`.
+
+2. **Assumptions: Normality & Equal Variance**
+   - Pooled QQ-plot: approximately normal residuals by position.
+   - S–L plot: variance independent of medians → constant spread.
+
+3. **Defense Merge: Solo Tackles vs Broad Jump**
+   - Raw data heavily skewed; applied Box–Cox (λ = 2).
+   - Assumptions not fully satisfied → inconclusive model.
+
+4. **Games Played vs Receptions**
+   - Positive trend: more games → more receptions, but wide spread.
+   - Simple regression not appropriate due to heteroscedasticity.
+
+5. **Rushing Merge: Bench vs Avg Rushing Yards**
+   - Raw scatter: weak negative trend with spread issues.
+   - Box–Cox (λ = 0.5) improved assumptions.
+   - Final model reasonable: √Avg Rushing ~ Bench.
+
+---
+
+## ✅ Key Findings
+
+- **Player position strongly determines combine weight.**
+- **CB vs OT** weight distributions differ by ~multiplicative 1.5 + additive 27 offset.
+- **Transformations (Box–Cox)** were crucial for meeting regression assumptions.
+- **Games played drives performance stats**, making raw metrics misleading.
+- Some combine–performance links (e.g., Bench vs Avg Rush) can be modeled, others remain inconclusive.
+
+---
+
+## 🏁 Conclusion
+
+This analysis highlighted both the potential and the challenges of linking NFL combine metrics to player performance. Positional weight differences were clearly defined, while relationships like Bench vs Avg Rushing required careful transformation to satisfy regression assumptions. Other links (e.g., Solo Tackles vs Broad Jump) proved inconclusive due to unmet assumptions. Overall, the study shows that combine measures can provide useful context but should be interpreted cautiously alongside in-game statistics. Future work could extend this by applying multivariate models or considering interaction effects across multiple performance metrics.
