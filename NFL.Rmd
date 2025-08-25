@@ -1,0 +1,404 @@
+---
+title: "NFL Combine Data Analysis"
+author: "Jane Maguire"
+date: "2024-04-18"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+
+## Introduction
+
+In this analysis, I will be examining NFL combine data alongside 2018 game statistics encompassing rushing, passing, receiving, and defensive statistics. The NFL combine data provides a comprehensive overview of players' physical attributes and performance in physical tests, offering insights into their athletic abilities and potential for success in professional football. By comparing this data with in-game performance statistics from the 2018 season, which shows players' on-field contributions and effectiveness in various roles, I aim to uncover patterns and trends that may help show what factors influence player success in the NFL.
+
+## Analysis
+
+##### Libraries and Load Data
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tukeyedar)
+
+defense <- read.csv("defense_2018.csv")
+passing <- read.csv("passing_2018.csv")
+receiving <- read.csv("receiving_2018.csv")
+rushing <- read.csv("rushing_2018.csv")
+combine <- read.csv("NFLcombine.csv")
+```
+
+### Analyzing differences in weight across position using Combine dataset
+
+My goal by looking at this data was to explore the relationship of different values across different positions. I began by looking at specifically the weight variable from the combine dataset because different positions require different levels of strength so I was curious to see how the weight of players might change across different positions.
+
+```{r}
+# Removing Pos and NT from Position Variable
+combine <- combine %>%
+  filter(!(pos %in% c("Pos", "NT", "LB", "LS")))
+```
+
+After looking into the data, there was only one Nose Tackle(NT) in the dataset, 2 linebackers(LB) and 7 Long snappers(LS). Because of this I chose to remove the players with these positions from the dataset because the limited observations would not be representative of the entire positional groups. In other words I would not be able to generalize the data based on the limited observations. I also removed the row with the position labeled Pos because this row was not associated with any one player and did not have a real position attached to it so again it could skew my results if included.
+
+#### Boxplots looking at how weight changes by position
+
+My first step was to create side-by-side boxplots so that I could visualize what the relationship between weight and position may look like. I ordered the boxplots by median so that I could more clearly see if there was a relationship.
+
+```{r fig.width=7, fig.height=4}
+# Plot relationship between Position and Weight
+ordered_positions <- combine %>%
+  group_by(pos) %>%
+  summarise(median_weight = median(weight)) %>%
+  arrange(median_weight) %>%
+  pull(pos)
+
+# Convert Pos to a factor with the desired order
+combine$pos <- factor(combine$pos, levels = ordered_positions)
+
+# Plot faceted boxplot with positions ordered from smallest to biggest
+ggplot(combine, aes(x = pos, y = weight)) + 
+  geom_boxplot(outlier.size = 0.5) +
+  labs(x = "Position", y = "Weight")
+```
+
+After creating these boxplots, I could see that there is a difference in weight across positions. The largest difference in weight seen across positions is between Cornerbacks(CB) and Offensive Tackles(OT). I chose to look further into this relationship specifically focusing on what I could use to model the difference in weight between Cornerbacks(CB) and Offensive Tackles(OT). I next chose to model this relationship by making a qq-plot.
+
+
+#### QQ-Plot of OT and CB positions
+
+I modeled the data by making a qq-plot of the Cornerback(CB) and Offensive Tackle(OT) positions.
+
+```{r fig.width=5, fig.height=4}
+CB <- filter(combine, pos == "CB") %>%  pull(weight)
+OT  <- filter(combine, pos == "OT")  %>%  pull(weight)
+
+eda_qq(CB, OT, fx = "x*1.5 + 27") 
+```
+
+While making this qq-plot, I found there to be both an additive and multiplicative offset. I first found the multiplicative offset to be about 1.5. Then I adjusted the additive offset and found it to be around 27. As we see on the QQ-plot the tail ends of the data do not follow the trend line as well. This is ok because the tail ends of the qq-plot are where outliers fall and we can still see that the core of the data falls on the line once the multiplicitve and additive offsets are accounted for.
+
+
+#### Overlapping Density plots to see difference between OB and CB positions
+
+To further visualize the nature of this relationship, I produced overlapping density plots without and with the multiplicative and additive offsets so I could see how adding the offsets models the data.
+
+```{r fig.width=5, fig.height=4}
+#Density Plot without Offset
+eda_dens(CB, OT)
+
+#Density Plot with Offset
+eda_dens(CB*1.5 + 27, OT)
+```
+
+The overlapping density plots reinforce what I found when making the qq-plot which is that the offset of (CB)*1.5 + 27 does a good job of modeling the difference in weight between a cornerback(CB) and a offensive tackle(OT).
+
+
+#### Pooled Residual QQ-Plot
+
+Going back to the full combine dataset with all positions I then used a pooled residual QQ-plot to check that the data meets the normality assumption of linear regression. In a Pooled Residual QQ-Plot the quantiles of the standardized residuals are compared to the quantiles of a standard normal distribution.
+
+```{r fig.width=8, fig.height=4}
+qq_resid <- combine %>% 
+  group_by(pos) %>% 
+  arrange(weight)     %>% 
+  mutate(Residuals = weight - mean(weight),
+         f.val = (row_number() - 0.5) / n() ) %>%
+  ungroup() %>% 
+  mutate(`Pooled residuals` = quantile(Residuals, f.val)) 
+
+ggplot(qq_resid, aes(x = `Pooled residuals`, y = Residuals))  + geom_point() +
+  geom_abline(intercept = 0, slope = 1) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 5)) +
+  facet_wrap(~ pos, nrow = 1)
+```
+
+The residuals across positions fall approximately along the diagonal line, this suggests that the residuals are normally distributed. This indicates that the normality assumption of a linear regression model is met.
+
+
+#### S-L PLot
+
+I then used an s-l plot to help identify the type of relationship between spread and location and assess the assumption of constant variance of residuals. If the line increases monotonically upward, there is an increasing spread as a function of increasing location; if the line decreases monotonically downward, there is a decreasing spread as a function of increasing location; and if the line is neither increasing nor decreasing monotonically, there is no change in spread as a function of location. We are looking for the line to be neither increasing nor decreasing.
+
+```{r fig.width=8, fig.height=4}
+sl <- combine %>%
+   group_by(pos)  %>%
+   mutate( Median = median(weight),
+           Residuals = sqrt(abs( weight - Median))) %>% 
+   ungroup()  
+
+# Generate the s-l plot 
+ ggplot(sl, aes(x = Median, y = Residuals)) + 
+   geom_jitter(alpha = 0.4, width = 0.05, height = 0) +
+   stat_summary(fun = median, geom = "line", col = "red") +
+   ylab(expression(sqrt( abs(" Residuals ")))) +
+   geom_text(aes(x = Median, y = 7.5, label = pos))
+
+```
+
+The s-l plot shows some variability but the line is not monotonically increasing or decreasing so we can assume the data does not exhibit any dependence between a positions spread and its median value.
+
+As a result of looking at the pooled residual qq-plot and the s-l plot, we can say that the assumptions of linear regression are met.
+
+
+### Merging Combine and Defense Datasets
+
+The next step I wanted to take in my analysis was to merge the Combine and Defense datasets so that I could explore the relationship between combine variables and defensive stats.
+
+```{r}
+#Merge Combine and Defense Datasets
+defense_combine <- right_join(combine, defense, by = c("name" = "Player"))
+```
+
+#### Original Scatter Plot
+
+The first step I took was making a scatterplot to visualize the variables of Solo Tackles and Broad Jump.
+
+```{r fig.width=4, fig.height=3}
+# Create the Scatterplot
+ggplot(defense_combine, aes(x = Solo, y = jump)) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE) +
+  labs(x = "Solo Tackles", y = "Broad jump (inches)")
+```
+
+After creating this scatterplot and testing some of the assumptions it was clear that the data is pretty heavily skewed to the left. This makes sense because when looking at the data as a whole I found the pattern that a lot of players did not play every game. So, if a player had less games there stats would be lower. This is why it makes sense that we see more data points closer to 0. However, I then attempted a data transformation to see if re-expression could help normalize any of the assumptions.
+
+
+#### Data Transformation
+
+I used a box-cox transformation so I could easily change the power I was testing. I found that using a power of 2 best met the assumptions and created the best model for the data.
+
+```{r}
+# Create the box-cox function
+BC <- function(x, p = 0) {
+  if(p == 0) {
+    z <- log(x)
+  } else {
+    z <- (x^p - 1)/p
+  }
+  return(z)
+}
+
+# Create the Box-Cox transformed variable 'jump_re'
+defense_combine_trans <- defense_combine %>%
+  mutate(jump_re = BC(jump, 2))
+
+# Filter the dataset to include only rows with complete data for both jump and Solo
+dat <- defense_combine_trans[complete.cases(defense_combine_trans$jump, defense_combine_trans$Solo), ]
+```
+
+#### Transformed Scatterplot
+
+After transforming the data, I then regenerated the scatterplot with the transformed data.
+
+```{r fig.width=4, fig.height=3}
+# Generate Scatterplot
+ggplot(defense_combine_trans, aes(Solo , jump_re)) + geom_point() +
+  stat_smooth(method = "lm", se=FALSE, formula = y ~ x) +
+  ylab(expression(Broad~~jump^(2))) +
+  xlab("Solo Tackles")
+```
+
+After, transforming the data I then went on to check assumptions.
+
+
+#### Residual Dependency Plot
+
+First, I looked at the residual dependency plot to check the assumption of normality.
+
+```{r fig.width=4, fig.height=3}
+# Create model
+M <- lm(jump_re ~ Solo, data = dat)
+
+# Compute residuals
+dat$Residuals <- residuals(M)
+
+# Generate residual plot
+ggplot(dat, aes(x = Solo, y = Residuals)) + 
+  geom_point() +
+  stat_smooth(method = "loess", se = FALSE, span = 2) +
+  xlab("Solo Tackles") +
+  ylab("Residuals")
+```
+
+The residual-dependence plot does not exhibit a non-random pattern across the range of Solo Tackle values. This satisfies the normality assumption about $\epsilon$.
+
+
+#### S-L Plot
+
+Next, I looked at the s-l plot to test the assumption of equal variance. 
+
+```{r fig.width=4, fig.height=3}
+# Compute standardized residuals and extract fitted values
+sl2 <- data.frame( std.res = sqrt(abs(residuals(M))), 
+                   fit     = predict(M))
+
+# Plot the data
+ggplot(sl2, aes(x = fit, y  =std.res)) + geom_point() +
+  stat_smooth(method = "loess", se = FALSE, span = 1, 
+              method.args = list(degree = 1) ) +
+  ylab(expression(sqrt(abs(residuals))) ) +
+  xlab("Solo Tackles")
+
+```
+
+The s-l plot does show a line that appears to be monotonically decreasing so there is likely a decreasing spread as a function of increasing Solo Tackles. When I re-expressed this data I found that this is the closest I could get to not having a monotonically increasing or decreasing line. But by looking at the residual dependency plot and the s-l plot, we can say that the assumptions of linear regression are not exactly met which tells us that we should proceed with extreme caution when doing further analysis. I chose to end my analysis of these two variables here because they are not meeting assumptions. In further analysis adding more variables and interaction terms could be an interesting way to see if we could find a good model for the prediction of Broad Jump Height in inches based on number of Solo Tackles.
+
+
+
+### Relationship between Games Played and Stats using the Recieving Dataset
+
+I then wanted to explore further how the number of games played effects a players stats because it seems like that is effecting the analysis I attempted above. If a player played in less games there stats would be lower so it makes sense that we see more data points closer to 0. To do this, I looked at the receiving dataset, and more specifically the relationship between Games Played and Number of Receptions.
+
+#### Scatterplot of Games Played vs Receptions
+
+To do this, I created a scatterplot of the two variables.
+
+```{r fig.width=4, fig.height=3}
+# Create the Scatterplot
+ggplot(receiving, aes(x = Gms, y = Rec)) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE) +
+  labs(x = "Games Played", y = "Receptions")
+```
+
+This trend of this scatterplot aligns with my previous hypothesis, that the more games you play, the more likely you are to have higher stats. However, Fitting a linear regression would not necessarily be applicable here because even if you play a lot of games you are not guaranteed to have high Receptions. You could play in every game and have not caught any passes. Because of this the data will have increasing spread of receptions as the number of games played increases.
+
+
+
+
+
+### Merging Combine and rushing Datasets
+
+The last step I wanted to take in my analysis was to merge the Combine and rushing datasets so that I could explore the relationship between combine variables and rushing stats. 
+
+```{r}
+#Merge Combine and receiving Datasets
+rushing_combine <- right_join(combine, rushing, by = c("name" = "Player"))
+```
+
+#### Original Scatter Plot
+
+The first step I took was making a scatterplot to visualize the variables of Bench and Average Rushing Yards.
+
+```{r fig.width=4, fig.height=3}
+# Create the plot
+ggplot(rushing_combine, aes(x = bench, y = Avg)) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE) +
+  labs(x = "Bench", y = "Avg")
+```
+
+After creating this scatterplot it appeared that the data had a slightly negative relationship. I tested assumptions for this model without any data transformation and there was a monotonic increase in the spread level plot which means there is likely a increasing spread as a function of increasing Bench weight. Because of this I then attempted a data transformation to see if re-expression could help normalize the assumptions.
+
+
+#### Data Transformation
+
+I used the box-cox transformation I created previously so I could easily change the power I was testing. I found that using a power of 1/2 best met the assumptions and created the best model for the data.
+
+```{r}
+# Create the Box-Cox transformed variable 'jump_re'
+rushing_combine_trans <- rushing_combine %>%
+  mutate(avg_re = BC(Avg, 0.5))
+
+# Filter the dataset to include only rows with complete data for both jump and Solo
+dat <- rushing_combine_trans[complete.cases(rushing_combine_trans$bench, rushing_combine_trans$Avg), ]
+```
+
+#### Transformed Scatterplot
+
+After transforming the data, I then regenerated the scatterplot with the transformed data.
+
+```{r fig.width=4, fig.height=3}
+# Generate Scatterplot
+ggplot(rushing_combine_trans, aes(bench , avg_re)) + geom_point() +
+  stat_smooth(method = "lm", se=FALSE, formula = y ~ x) +
+  ylab(expression(Average~~Rushing^(1/2))) +
+  xlab("Bench")
+```
+
+
+#### Residual Dependency Plot
+
+Then to check assumptions, I first looked at the residual dependency plot to check the normality assumption.
+
+```{r fig.width=4, fig.height=3}
+dat <- dat[!is.na(dat$avg_re) & !is.na(dat$bench), ]  # Remove rows with missing values
+rownames(dat) <- NULL  # Reset row names
+
+# Create model
+M <- lm(avg_re ~ bench , data = dat)
+
+# Compute residuals
+dat$Residuals <- residuals(M)
+
+# Generate residual plot
+ggplot(dat, aes(x = bench, y = Residuals)) + 
+  geom_point() +
+  stat_smooth(method = "loess", se = FALSE, span = 1.5) +
+  xlab("Bench") +
+  ylab("Residuals")
+```
+
+The residual-dependence plot does not exhibit a non-random pattern across the range of bench values. This satisfies the normality assumption about $\epsilon$.
+
+
+#### S-L Plot
+
+Next, I looked at the s-l plot to test the assumption of equal variance. 
+
+```{r fig.width=4, fig.height=3}
+# Compute standardized residuals and extract fitted values
+sl2 <- data.frame( std.res = sqrt(abs(residuals(M))), 
+                   fit     = predict(M))
+
+# Plot the data
+ggplot(sl2, aes(x = fit, y  =std.res)) + geom_point() +
+  stat_smooth(method = "loess", se = FALSE, span = 1.5, 
+              method.args = list(degree = 1) ) +
+  ylab(expression(sqrt(abs(residuals))) ) +
+  xlab("Bench")
+```
+
+The s-l plot does not show a line that appears to be monotonically increasing or decreasing which means there is no change in spread as a function of location. After re-expressing the data I found that this is the closest I could get assumptions being met. Because both the residual dependency plot and the s-l plot appear to meet assumptions, I would suggest this a good potential model to represent average rushing yards based on weight benched.
+
+
+
+## Discussion
+
+In my analysis I tried to look into relationships between various variables in NFL combine data and player performance metrics. When examining the differences in weight across position I found a substantial difference in weight between Cornerbacks (CB) and Offensive Tackles (OT). Modeling this difference using a qq-plot demonstrated an additive and multiplicative offset, effectively capturing the distinction in weight between these positions. Throughout the analysis I continuously tested assumptions for linear regression by pooled residual QQ-plots, residual dependency and S-L plots. While some models met these assumptions, others exhibited deviations, highlighting the need for caution in interpretation. In cases where assumptions were not met, I used data transformations such as the Box-Cox transformation to address issues such as skewness and heteroscedasticity. The goal of these transformations was to normalize the data distribution and improve the model fit. I also explored the relationship between the number of games played and player performance stats, such as receptions and rushing yards. It was observed that players who participated in more games tended to have higher performance metrics, indicating the influence of game participation on player statistics. While the current analysis provided valuable insights into the relationships between various variables, there remains potential for further investigation. Future research could explore additional factors and their interactions using multivariate analysis to develop more comprehensive models for predicting player stats. In my analysis I attempted to provide a deeper understanding of the complex relationships between NFL combine data and player performance metrics. In conclusion, y continuously testing assumptions and employing appropriate techniques, valuable insights were gained, which can lead to future research questions and anlaysis.
+
+
+
+## References
+
+R Core Team (2023). _R: A Language and Environment for
+  Statistical Computing_. R Foundation for Statistical
+  Computing, Vienna, Austria. <https://www.R-project.org/>
+  
+Wickham H, François R, Henry L, Müller K, Vaughan D (2023).
+  _dplyr: A Grammar of Data Manipulation_. R package version
+  1.1.4, <https://CRAN.R-project.org/package=dplyr>.
+  
+H. Wickham. ggplot2: Elegant Graphics for Data Analysis.
+  Springer-Verlag New York, 2016.
+
+Wickham H, Vaughan D, Girlich M (2024). _tidyr: Tidy Messy
+  Data_. R package version 1.3.1,
+  <https://CRAN.R-project.org/package=tidyr>.
+
+M. Gimond, (2021). _tukeyedar: A package of Tukey inspired EDA functions.
+  <https://mgimond.github.io/tukeyedar/>
+
+
+The combine data comes from the following link: https://nflcombineresults.com/  
+The description of combine tests comes from the following link: https://en.wikipedia.org/wiki/NFL_Scouting_Combine   
+The 2018 game stats comes from the following link: https://www.footballdb.com/    
+I used notes and code templates from the following link: https://mgimond.github.io/ES218/   
+
